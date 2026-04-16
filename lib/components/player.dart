@@ -38,13 +38,18 @@ class Player extends SpriteAnimationGroupComponent<PlayerState>
   static const double gravity = 980.0;
   static const double maxJumpForce = -500.0;
   static const double minJumpForce = -200.0;
-  static const double chargeRate = 1.0; // fills 0→1 in ~1 second
+  static const double chargeRate = 2.0; // fills 0→1 in ~0.5 seconds
   static const double moveSpeed = 120.0;
   static const double maxFallSpeed = 600.0;
-  
+
+  // Grace period so collision jitter doesn't cut off the charge
+  // (Flame's onCollisionEnd fires even on minor hitbox fluctuations)
+  static const double _groundGrace = 0.15; // 150 ms
+  double _groundTimer = 0.0;
+
   // Physics state
   Vector2 velocity = Vector2.zero();
-  bool isOnGround = false;
+  bool get isOnGround => _groundTimer > 0;
   bool isCharging = false;
   double chargeAmount = 0.0;
   int facing = 1; // 1 = right, -1 = left
@@ -359,7 +364,10 @@ class Player extends SpriteAnimationGroupComponent<PlayerState>
   @override
   void update(double dt) {
     super.update(dt);
-    
+
+    // Tick down ground grace timer each frame
+    if (_groundTimer > 0) _groundTimer = (_groundTimer - dt).clamp(0.0, _groundGrace);
+
     // JumpKing mechanics: charge jump while on ground
     if (isOnGround) {
       // Horizontal movement only on ground
@@ -390,7 +398,7 @@ class Player extends SpriteAnimationGroupComponent<PlayerState>
         if (moveLeft) velocity.x = -moveSpeed * 1.5;
         if (moveRight) velocity.x = moveSpeed * 1.5;
         
-        isOnGround = false;
+        _groundTimer = 0; // explicitly leave ground
         isCharging = false;
         chargeAmount = 0;
       }
@@ -439,24 +447,19 @@ class Player extends SpriteAnimationGroupComponent<PlayerState>
   void onCollisionStart(Set<Vector2> intersectionPoints, PositionComponent other) {
     super.onCollisionStart(intersectionPoints, other);
     
-    if (other is PlatformBlock && velocity.y > 0) {
+    if (other is PlatformBlock && velocity.y >= 0) {
       // Landing on platform from above
       final platformTop = other.position.y;
       if (position.y <= platformTop + 10) {
         position.y = platformTop;
         velocity.y = 0;
         velocity.x = 0;
-        isOnGround = true;
+        _groundTimer = _groundGrace; // refresh grace timer
       }
     }
   }
 
-  @override
-  void onCollisionEnd(PositionComponent other) {
-    super.onCollisionEnd(other);
-    if (other is PlatformBlock) {
-      // Check if we've left the platform
-      isOnGround = false;
-    }
-  }
+  // onCollisionEnd intentionally removed:
+  // Flame fires it on minor hitbox fluctuations (jitter), which would
+  // cut off the jump charge. _groundTimer expires naturally in update().
 }
